@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# C extensions
+*.so
+
 # Distribution / packaging
 .Python
 build/
@@ -43,6 +46,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+cover/
 
 # Environments
 .env
@@ -51,13 +55,19 @@ env/
 venv/
 ENV/
 env.bak/
-venv.bak/
+virtualenv/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *~
+*.sublime-workspace
+*.sublime-project
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Docker
 docker-compose.override.yml
@@ -65,8 +75,8 @@ docker-compose.override.yml
 # Logs
 *.log
 
-# macOS
-.DS_Store
+# Environment variables (if any)
+.env.example
 
 # Misc
-*/__pycache__/*
+.DS_Store
