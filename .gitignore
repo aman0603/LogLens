@@ -1,67 +1,27 @@
-# Byte-compiled / optimized / DLL files
+.env
+!.env.example
+
 __pycache__/
 *.py[cod]
-*$py.class
-
-# Distribution / packaging
-build/
-dist/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
-
-# Environments
-.env
-.venv
-env/
+.venv/
 venv/
-ENV/
-env.bak/
-virtualenv/
 
-# IDE
+bin/
+*.test
+
 .vscode/
 .idea/
 *.swp
 *~
-*.sublime-workspace
-*.sublime-project
 
-# OS
 .DS_Store
 Thumbs.db
 
-# Docker
 docker-compose.override.yml
 
-# Logs
 *.log
 
-# Environment variables (if any)
-.env.example
+build/
+dist/
 
-# Misc
-.DS_Store
+.workflow/
