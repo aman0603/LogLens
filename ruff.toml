@@ -1,0 +1,23 @@
+exclude = [
+    ".git",
+    ".agents",
+    ".serena",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".workflow",
+]
+
+line-length = 100
+
+[lint]
+# Project-wide ignores for style rules that conflict with existing code patterns.
+ignore = [
+    "E741",   # ambiguous variable name (legacy single-letter loops)
+    "E402",   # module import not at top (kept for lazy/heavy imports)
+    "C901",   # complex function
+    "E501",   # line too long (handled by formatter)
+]
+
+[format]
+quote-style = "double"

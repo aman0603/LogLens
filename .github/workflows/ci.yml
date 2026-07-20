@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff pytest
+
+      - name: Format check (ruff)
+        run: ruff format --check .
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Unit tests
+        env:
+          JWT_SECRET: ci-secret
+          DATABASE_URL: postgresql://loglens:loglens@localhost:5432/loglens
+          GEMINI_API_KEY: ci-key
+        run: |
+          export PYTHONPATH=shared
+          python -m unittest discover -s shared/tests -p 'test_*.py'
+          python -m unittest discover -s apps/incident-service/tests -p 'test_*.py'
+          python -m unittest discover -s apps/ai-service/tests -p 'test_*.py'
+
+      - name: Build service images
+        run: |
+          for svc in api ai-service incident-service storage-consumer embedding-service log-producer; do
+            echo "Building $svc"
+            docker build -f Dockerfile.python --build-arg SERVICE_DIR=./apps/$svc -t loglens/$svc:ci .
+          done

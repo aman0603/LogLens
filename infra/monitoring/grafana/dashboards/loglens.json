@@ -1,0 +1,71 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "LogLens Services",
+    "tags": ["loglens"],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "panels": [
+      {
+        "id": 1,
+        "title": "Request rate by service",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "sum by (service) (rate(http_requests_total[5m]))",
+            "legendFormat": "{{service}}"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Error rate (5xx) by service",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "sum by (service) (rate(http_requests_total{status=~\"5..\"}[5m]))",
+            "legendFormat": "{{service}}"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "p95 request latency by service",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum by (service, le) (rate(http_request_duration_seconds_bucket[5m])))",
+            "legendFormat": "{{service}}"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Kafka messages by outcome",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "sum by (service, outcome) (rate(kafka_messages_total[5m]))",
+            "legendFormat": "{{service}}/{{outcome}}"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Total requests by endpoint",
+        "type": "bargauge",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "sum by (service, endpoint) (http_requests_total)",
+            "legendFormat": "{{service}} {{endpoint}}"
+          }
+        ]
+      }
+    ]
+  }
+}

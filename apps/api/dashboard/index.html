@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LogLens — Incident Console</title>
+  <style>
+    :root { --bg:#0f1115; --panel:#171a21; --text:#e6e6e6; --muted:#8b93a7; --accent:#5b8def; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: -apple-system, system-ui, sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:16px 24px; border-bottom:1px solid #232733; display:flex; align-items:center; justify-content:space-between; }
+    header h1 { font-size:18px; margin:0; }
+    .layout { display:grid; grid-template-columns: 420px 1fr; height: calc(100vh - 57px); }
+    .list { overflow-y:auto; border-right:1px solid #232733; }
+    .incident { padding:14px 18px; border-bottom:1px solid #1d212b; cursor:pointer; }
+    .incident:hover { background:#1b1f29; }
+    .incident.active { background:#1f2533; border-left:3px solid var(--accent); }
+    .incident .title { font-weight:600; font-size:14px; }
+    .incident .meta { color:var(--muted); font-size:12px; margin-top:4px; }
+    .sev { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; font-weight:600; margin-right:6px; }
+    .sev-critical { background:#5a1d1d; color:#ff8a8a; }
+    .sev-high { background:#5a3a1d; color:#ffc078; }
+    .sev-medium { background:#4a4a1d; color:#ffe066; }
+    .sev-low { background:#1d4a2a; color:#8ce99a; }
+    .detail { padding:24px; overflow-y:auto; }
+    .detail h2 { margin-top:0; }
+    .empty { color:var(--muted); padding:40px; text-align:center; }
+    table { width:100%; border-collapse:collapse; margin-top:12px; font-size:13px; }
+    th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #232733; }
+    th { color:var(--muted); font-weight:500; }
+    .pill { background:#232733; border-radius:10px; padding:2px 8px; margin-right:6px; font-size:12px; }
+    .sim { background:#141823; border:1px solid #232733; border-radius:8px; padding:10px 14px; margin-bottom:8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>LogLens — Incident Console</h1>
+    <span id="refresh" style="color:var(--muted);cursor:pointer;font-size:13px;">↻ Refresh</span>
+  </header>
+  <div class="layout">
+    <div class="list" id="list"><div class="empty">Loading incidents…</div></div>
+    <div class="detail" id="detail"><div class="empty">Select an incident to investigate.</div></div>
+  </div>
+
+  <script>
+    const API = "";
+    const AI_BASE = (document.querySelector('meta[name="ai-base"]') || {}).content || "http://localhost:8001";
+    let incidents = [];
+
+    async function load() {
+      const res = await fetch(API + "/incidents/?limit=200");
+      incidents = await res.json();
+      renderList();
+    }
+
+    function sevClass(s) { return "sev sev-" + s; }
+
+    function renderList() {
+      const list = document.getElementById("list");
+      if (!incidents.length) { list.innerHTML = '<div class="empty">No incidents detected yet.</div>'; return; }
+      list.innerHTML = incidents.map((i, idx) => `
+        <div class="incident" data-idx="${idx}">
+          <div class="title"><span class="${sevClass(i.severity_label)}">${i.severity_label}</span>${i.title}</div>
+          <div class="meta">${new Date(i.start_time).toLocaleString()} · ${i.services.join(", ")} · ${i.log_count} logs</div>
+        </div>`).join("");
+      list.querySelectorAll(".incident").forEach(el => {
+        el.onclick = () => { selectIncident(parseInt(el.dataset.idx)); };
+      });
+    }
+
+    async function selectIncident(idx) {
+      document.querySelectorAll(".incident").forEach(e => e.classList.remove("active"));
+      document.querySelector(`.incident[data-idx="${idx}"]`)?.classList.add("active");
+      const inc = incidents[idx];
+      const detail = document.getElementById("detail");
+      detail.innerHTML = `<h2>${inc.title}</h2>
+        <div>
+          <span class="pill">severity ${inc.severity}</span>
+          <span class="pill">${inc.status}</span>
+          <span class="pill">${inc.services.join(", ")}</span>
+          <span class="pill">${inc.log_count} logs</span>
+        </div>`;
+
+      const [tl, sim] = await Promise.all([
+        fetch(API + `/incidents/${inc.id}/timeline`).then(r => r.json()),
+        fetch(API + `/incidents/${inc.id}/similar?limit=5`).then(r => r.json()),
+      ]);
+
+      detail.innerHTML += `<h3>Timeline</h3>`;
+      if (tl.length) {
+        detail.innerHTML += `<table><thead><tr><th>time</th><th>service</th><th>level</th><th>message</th></tr></thead><tbody>
+          ${tl.map(l => `<tr><td>${new Date(l.timestamp).toLocaleString()}</td><td>${l.service_name}</td><td>${l.level}</td><td>${l.message}</td></tr>`).join("")}
+        </tbody></table>`;
+      } else {
+        detail.innerHTML += `<div class="empty">No logs linked.</div>`;
+      }
+
+      detail.innerHTML += `<h3>Similar historical incidents</h3>`;
+      if (sim.length) {
+        detail.innerHTML += sim.map(s => `<div class="sim"><b>${s.title}</b> — similarity ${s.similarity}
+          <div style="color:var(--muted);font-size:12px;">${s.services.join(", ")} · ${new Date(s.start_time).toLocaleString()}</div></div>`).join("");
+      } else {
+        detail.innerHTML += `<div class="empty">No similar incidents found.</div>`;
+      }
+
+      detail.innerHTML += `
+        <h3>AI Investigation</h3>
+        <div style="margin-bottom:10px;">
+          <button id="ai-summarize" style="background:var(--accent);color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;">Summarize</button>
+          <button id="ai-investigate" style="background:#3b4252;color:#fff;border:none;padding:6px 12px;border-radius:6px;cursor:pointer;margin-left:8px;">Investigate root cause</button>
+        </div>
+        <div id="ai-result" class="empty">Run an AI analysis to get a summary and likely root cause with cited evidence.</div>`;
+
+      document.getElementById("ai-summarize").onclick = () => runAI(inc.id, "summarize");
+      document.getElementById("ai-investigate").onclick = () => runAI(inc.id, "investigate");
+    }
+
+    async function runAI(incidentId, kind) {
+      const out = document.getElementById("ai-result");
+      out.className = "";
+      out.innerHTML = `<div class="empty">Contacting AI service…</div>`;
+      try {
+        const res = await fetch(AI_BASE + `/ai/incident/${incidentId}/${kind}`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+        });
+        if (!res.ok) {
+          out.innerHTML = `<div class="empty">AI service returned ${res.status}. Is the ai-service running and GEMINI_API_KEY set?</div>`;
+          return;
+        }
+        const data = await res.json();
+        const ev = (data.evidence || []).map(e => `<li>[${e.kind}:${e.ref_id}] ${e.snippet}</li>`).join("");
+        let html = "";
+        if (kind === "summarize") {
+          html += `<div style="white-space:pre-wrap;">${data.summary}</div>`;
+        } else {
+          if (data.insufficient_evidence) html += `<div class="pill" style="background:#5a3a1d;color:#ffc078;">insufficient evidence</div><br/>`;
+          if (data.confidence) html += `<div class="pill">confidence: ${data.confidence}</div><br/>`;
+          html += `<div style="white-space:pre-wrap;margin-top:8px;">${data.root_cause_hypothesis}</div>`;
+        }
+        html += `<h4>Cited evidence</h4><ul style="font-size:12px;color:var(--muted);">${ev || "<li>none</li>"}</ul>`;
+        if (kind === "investigate" && data.similar_incidents && data.similar_incidents.length) {
+          html += `<h4>Similar incidents used</h4>` + data.similar_incidents.map(s =>
+            `<div class="sim">[incident:${s.id}] ${s.title} (similarity ${s.similarity})</div>`).join("");
+        }
+        out.innerHTML = html;
+      } catch (e) {
+        out.innerHTML = `<div class="empty">Failed to reach AI service at ${AI_BASE}.</div>`;
+      }
+    }
+
+    document.getElementById("refresh").onclick = load;
+    load();
+  </script>
+</body>
+</html>
