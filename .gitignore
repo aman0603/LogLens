@@ -25,3 +25,8 @@ build/
 dist/
 
 .workflow/
+
+.serena/
+.agents/
+AGENTS.md
+AUTONOMOUS_WORKFLOW.md
