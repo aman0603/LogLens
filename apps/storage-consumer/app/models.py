@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, Text, func
 from .database import Base
 
+
 class LogEntry(Base):
     __tablename__ = "log_entries"
 

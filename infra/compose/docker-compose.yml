@@ -8,6 +8,11 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep -q imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   kafka:
     image: confluentinc/cp-kafka:latest
@@ -23,6 +28,11 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
 
   postgres:
     image: postgres:15
@@ -34,40 +44,198 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loglens"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:6333/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   api:
     build:
-      context: ../../
+      context: .
       dockerfile: Dockerfile.python
       args:
         SERVICE_DIR: ./apps/api
+    command: ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgresql://loglens:loglens@postgres:5432/loglens
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-prod}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      RATE_LIMIT: "20"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   log-producer:
     build:
-      context: ../../
+      context: .
       dockerfile: Dockerfile.python
       args:
         SERVICE_DIR: ./apps/log-producer
+    command: ["sh", "-c", "python main.py"]
     depends_on:
       - kafka
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   storage-consumer:
     build:
-      context: ../../
+      context: .
       dockerfile: Dockerfile.python
       args:
         SERVICE_DIR: ./apps/storage-consumer
+    command: ["sh", "-c", "python main.py"]
     depends_on:
       - kafka
       - postgres
     environment:
       DATABASE_URL: postgresql://loglens:loglens@postgres:5432/loglens
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  embedding-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+      args:
+        SERVICE_DIR: ./apps/embedding-service
+    command: ["sh", "-c", "python main.py"]
+    depends_on:
+      - kafka
+      - qdrant
+    environment:
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  incident-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+      args:
+        SERVICE_DIR: ./apps/incident-service
+    command: ["sh", "-c", "python app/consumer.py"]
+    depends_on:
+      - kafka
+      - postgres
+    environment:
+      DATABASE_URL: postgresql://loglens:loglens@postgres:5432/loglens
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+      args:
+        SERVICE_DIR: ./apps/ai-service
+    command: ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://loglens:loglens@postgres:5432/loglens
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-prod}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
+      LLM_MODEL: ${LLM_MODEL:-gemini-3.1-flash-lite}
+      RATE_LIMIT: "20"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - api
+      - ai-service
+      - storage-consumer
+      - embedding-service
+      - incident-service
+      - log-producer
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - ./infra/monitoring/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./infra/monitoring/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./infra/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    depends_on:
+      - prometheus
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./infra/monitoring/otel-collector-config.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4317:4317"
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
 
 volumes:
   postgres_data:
+  qdrant_data:

@@ -1,6 +1,5 @@
 import os
 import json
-import time
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from confluent_kafka import Consumer, KafkaError
@@ -14,6 +13,7 @@ INPUT_TOPIC = "log-embeddings"
 # Initialize Qdrant client
 client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
+
 # Ensure collection exists
 def init_collection():
     try:
@@ -23,7 +23,9 @@ def init_collection():
             print(f"Creating collection {COLLECTION_NAME}")
             client.create_collection(
                 collection_name=COLLECTION_NAME,
-                vectors_config=VectorParams(size=384, distance=Distance.COSINE),  # default for MiniLM
+                vectors_config=VectorParams(
+                    size=384, distance=Distance.COSINE
+                ),  # default for MiniLM
             )
         else:
             print(f"Collection {COLLECTION_NAME} already exists.")
@@ -31,14 +33,15 @@ def init_collection():
         print(f"Error initializing collection: {e}")
         raise
 
+
 def main():
     print("Qdrant storage service starting...")
     init_collection()
 
     consumer_conf = {
-        'bootstrap.servers': KAFKA_BOOTSTRAP,
-        'group.id': 'qdrant-storage-group',
-        'auto.offset.reset': 'earliest'
+        "bootstrap.servers": KAFKA_BOOTSTRAP,
+        "group.id": "qdrant-storage-group",
+        "auto.offset.reset": "earliest",
     }
     consumer = Consumer(consumer_conf)
     consumer.subscribe([INPUT_TOPIC])
@@ -57,22 +60,18 @@ def main():
                     break
 
             try:
-                data = json.loads(msg.value().decode('utf-8'))
-                embedding = data.get('embedding')
+                data = json.loads(msg.value().decode("utf-8"))
+                embedding = data.get("embedding")
                 if embedding is None:
                     print("No embedding found, skipping")
                     continue
                 # Prepare payload: exclude embedding to save space? Keep all fields.
-                payload = {k: v for k, v in data.items() if k != 'embedding'}
+                payload = {k: v for k, v in data.items() if k != "embedding"}
                 # Use a UUID based on offset+partition+timestamp? Use Kafka offset as ID.
                 # We'll create a point ID from hash of key+offset+timestamp for simplicity.
                 # Use msg.offset() etc.
                 point_id = msg.offset() + msg.partition() * 1000000  # simple
-                point = PointStruct(
-                    id=point_id,
-                    vector=embedding,
-                    payload=payload
-                )
+                point = PointStruct(id=point_id, vector=embedding, payload=payload)
                 client.upsert(collection_name=COLLECTION_NAME, points=[point])
                 # Optional: log every 100
                 if point_id % 100 == 0:
@@ -85,5 +84,6 @@ def main():
     finally:
         consumer.close()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

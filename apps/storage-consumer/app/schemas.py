@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 
+
 class LogEntryBase(BaseModel):
     service_name: str
     level: str
@@ -9,8 +10,10 @@ class LogEntryBase(BaseModel):
     trace_id: Optional[str] = None
     span_id: Optional[str] = None
 
+
 class LogEntryCreate(LogEntryBase):
     pass
+
 
 class LogEntryRead(LogEntryBase):
     id: int

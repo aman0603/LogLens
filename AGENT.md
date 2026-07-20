@@ -206,6 +206,20 @@ Do not hardcode provider-specific implementations where an abstraction already e
 
 When extending functionality, prefer existing modules before introducing new packages.
 
+This project uses shared Dockerfiles.
+
+Do not create a Dockerfile inside every service unless that service has unique build requirements.
+
+Use:
+
+- Dockerfile.go
+- Dockerfile.python
+- Dockerfile.frontend
+
+at the repository root.
+
+All local development is orchestrated through a single root `docker-compose.yml`.
+
 ---
 
 # Autonomous Development Loop

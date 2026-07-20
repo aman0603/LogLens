@@ -1,6 +1,38 @@
-FROM python:3.11-slim
+# ---- Production Python service image (multi-stage, non-root) ----
+FROM python:3.11-slim AS builder
 WORKDIR /app
-ARG SERVICE_DIR
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Install build deps and dependencies into a local venv.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential gcc \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY ${SERVICE_DIR}/ . .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# ---- Runtime ----
+FROM python:3.11-slim AS runtime
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/install/bin:$PATH" \
+    PYTHONPATH="/app/shared:$PYTHONPATH"
+
+# Copy installed packages from builder.
+COPY --from=builder /install /install
+
+# Copy the shared library and the target service.
+COPY shared /app/shared
+ARG SERVICE_DIR
+COPY ${SERVICE_DIR}/ /app/
+
+# Run as a non-root user.
+RUN useradd --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"

@@ -9,3 +9,5 @@ confluent-kafka>=2.4.0
 faker
 sentence-transformers
 qdrant-client
+openai>=1.0.0
+

@@ -1,55 +1,85 @@
-import os
-import json
-import time
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
-from confluent_kafka import Consumer, KafkaError
+from confluent_kafka import Consumer, KafkaError, Producer
 
-KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
-QDRANT_HOST = os.getenv("QDRANT_HOST", "qdrant")
-QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
-COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "log_collection")
-INPUT_TOPIC = "logs"
-MODEL_NAME = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+from loglens import config as ll_config
+from loglens import logging as ll_logging
+from loglens import kafka_retry as ll_kafka_retry
+from loglens import metrics as ll_metrics
 
-# Initialize model
-print(f"Loading embedding model {MODEL_NAME}...")
+cfg = ll_config.load_config(
+    required=["QDRANT_HOST"],
+    optional={
+        "KAFKA_BOOTSTRAP_SERVERS": "kafka:9092",
+        "QDRANT_PORT": 6333,
+        "QDRANT_COLLECTION": "log_collection",
+        "INPUT_TOPIC": "logs",
+        "EMBEDDING_MODEL": "all-MiniLM-L6-v2",
+        "KAFKA_MAX_RETRIES": 3,
+    },
+    casts={"QDRANT_PORT": int, "KAFKA_MAX_RETRIES": int},
+)
+
+SERVICE_NAME = "embedding-service"
+logger = ll_logging.get_logger(SERVICE_NAME)
+
+KAFKA_BOOTSTRAP = cfg.get("KAFKA_BOOTSTRAP_SERVERS")
+QDRANT_HOST = cfg.get("QDRANT_HOST")
+QDRANT_PORT = cfg.get("QDRANT_PORT")
+COLLECTION_NAME = cfg.get("QDRANT_COLLECTION")
+INPUT_TOPIC = cfg.get("INPUT_TOPIC")
+MODEL_NAME = cfg.get("EMBEDDING_MODEL")
+
+logger.info(f"Loading embedding model {MODEL_NAME}")
 model = SentenceTransformer(MODEL_NAME)
-print("Model loaded.")
+logger.info("Model loaded.")
 
-# Initialize Qdrant client
 qdrant = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+
 
 def init_collection():
     try:
-        collections = qdrant.get_collections().collections
-        names = [c.name for c in collections]
+        names = [c.name for c in qdrant.get_collections().collections]
         if COLLECTION_NAME not in names:
-            print(f"Creating collection {COLLECTION_NAME}")
+            logger.info(f"Creating collection {COLLECTION_NAME}")
             qdrant.create_collection(
                 collection_name=COLLECTION_NAME,
                 vectors_config=VectorParams(size=384, distance=Distance.COSINE),
             )
         else:
-            print(f"Collection {COLLECTION_NAME} already exists.")
+            logger.info(f"Collection {COLLECTION_NAME} already exists.")
     except Exception as e:
-        print(f"Error ensuring collection: {e}")
+        logger.error(f"Error ensuring collection: {e}")
         raise
 
+
+def process_message(data: dict, msg_meta):
+    text = data.get("message", "")
+    if not text:
+        return
+    embedding = model.encode(text).tolist()
+    point_id = msg_meta["offset"] + msg_meta["partition"] * 1000000
+    point = PointStruct(id=point_id, vector=embedding, payload=data)
+    qdrant.upsert(collection_name=COLLECTION_NAME, points=[point])
+    if point_id % 100 == 0:
+        logger.info(f"Stored embedding for offset {msg_meta['offset']}")
+
+
 def main():
-    print("Embedding service starting...")
     init_collection()
-
-    consumer_conf = {
-        'bootstrap.servers': KAFKA_BOOTSTRAP,
-        'group.id': 'embedding-service-group',
-        'auto.offset.reset': 'earliest'
-    }
-    consumer = Consumer(consumer_conf)
+    consumer = Consumer(
+        {
+            "bootstrap.servers": KAFKA_BOOTSTRAP,
+            "group.id": "embedding-service-group",
+            "auto.offset.reset": "earliest",
+            "enable.auto.commit": True,
+        }
+    )
     consumer.subscribe([INPUT_TOPIC])
-
-    print(f"Consuming from topic {INPUT_TOPIC}")
+    producer = Producer({"bootstrap.servers": KAFKA_BOOTSTRAP})
+    max_retries = cfg.get("KAFKA_MAX_RETRIES")
+    logger.info(f"Consuming from topic {INPUT_TOPIC}")
     try:
         while True:
             msg = consumer.poll(1.0)
@@ -58,35 +88,25 @@ def main():
             if msg.error():
                 if msg.error().code() == KafkaError._PARTITION_EOF:
                     continue
-                else:
-                    print(f"Consumer error: {msg.error()}")
-                    break
-
-            try:
-                log_data = json.loads(msg.value().decode('utf-8'))
-                text = log_data.get('message', '')
-                if not text:
-                    # No text to embed, skip
-                    continue
-                embedding = model.encode(text).tolist()
-                # Create point ID: combine offset, partition, timestamp to avoid duplicates
-                # Using offset as base, shift by partition*large number
-                point_id = msg.offset() + msg.partition() * 1000000
-                point = PointStruct(
-                    id=point_id,
-                    vector=embedding,
-                    payload=log_data  # store entire log as payload
-                )
-                qdrant.upsert(collection_name=COLLECTION_NAME, points=[point])
-                if point_id % 100 == 0:
-                    print(f"Stored embedding for offset {msg.offset()}, partition {msg.partition()}")
-            except Exception as e:
-                print(f"Error processing message: {e}")
-                continue
+                logger.error(f"Consumer error: {msg.error()}")
+                break
+            meta = {"offset": msg.offset(), "partition": msg.partition()}
+            ll_kafka_retry.with_retry(
+                SERVICE_NAME,
+                INPUT_TOPIC,
+                msg.value(),
+                lambda d: process_message(d, meta),
+                producer=producer,
+                max_attempts=max_retries,
+                base_backoff=1.0,
+            )
     except KeyboardInterrupt:
         pass
     finally:
         consumer.close()
+        producer.flush()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
+    ll_metrics.start_sidecar(port=8000, service=SERVICE_NAME)
     main()
