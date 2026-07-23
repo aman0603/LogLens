@@ -1,4 +1,4 @@
-from sentence_transformers import SentenceTransformer
+from loglens import embedding as ll_embedding
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from confluent_kafka import Consumer, KafkaError, Producer
@@ -15,7 +15,7 @@ cfg = ll_config.load_config(
         "QDRANT_PORT": 6333,
         "QDRANT_COLLECTION": "log_collection",
         "INPUT_TOPIC": "logs",
-        "EMBEDDING_MODEL": "all-MiniLM-L6-v2",
+        "EMBEDDING_MODEL": ll_embedding.DEFAULT_MODEL,
         "KAFKA_MAX_RETRIES": 3,
     },
     casts={"QDRANT_PORT": int, "KAFKA_MAX_RETRIES": int},
@@ -31,9 +31,7 @@ COLLECTION_NAME = cfg.get("QDRANT_COLLECTION")
 INPUT_TOPIC = cfg.get("INPUT_TOPIC")
 MODEL_NAME = cfg.get("EMBEDDING_MODEL")
 
-logger.info(f"Loading embedding model {MODEL_NAME}")
-model = SentenceTransformer(MODEL_NAME)
-logger.info("Model loaded.")
+logger.info(f"Using cloud embedding model {MODEL_NAME}")
 
 qdrant = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
@@ -45,7 +43,7 @@ def init_collection():
             logger.info(f"Creating collection {COLLECTION_NAME}")
             qdrant.create_collection(
                 collection_name=COLLECTION_NAME,
-                vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+                vectors_config=VectorParams(size=ll_embedding.EMBEDDING_DIM, distance=Distance.COSINE),
             )
         else:
             logger.info(f"Collection {COLLECTION_NAME} already exists.")
@@ -58,7 +56,7 @@ def process_message(data: dict, msg_meta):
     text = data.get("message", "")
     if not text:
         return
-    embedding = model.encode(text).tolist()
+    embedding = ll_embedding.embed(text, model=MODEL_NAME)
     point_id = msg_meta["offset"] + msg_meta["partition"] * 1000000
     point = PointStruct(id=point_id, vector=embedding, payload=data)
     qdrant.upsert(collection_name=COLLECTION_NAME, points=[point])

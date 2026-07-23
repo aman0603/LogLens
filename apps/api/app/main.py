@@ -17,7 +17,7 @@ from loglens import ratelimit as ll_ratelimit
 from loglens import tracing as ll_tracing
 
 from . import crud, models, schemas, database
-from sentence_transformers import SentenceTransformer
+from loglens import embedding as ll_embedding
 from qdrant_client import QdrantClient
 
 # --- Centralized configuration (fail-fast) ---
@@ -29,7 +29,6 @@ cfg = ll_config.load_config(
         "QDRANT_COLLECTION": "log_collection",
         "RATE_LIMIT": 20,  # requests per second per client
         "OTEL_EXPORTER_OTLP_ENDPOINT": "",
-        "EMBEDDING_MODEL": "all-MiniLM-L6-v2",
     },
     casts={"QDRANT_PORT": int, "RATE_LIMIT": int},
 )
@@ -196,20 +195,11 @@ def similar_incidents(
     return crud.get_similar_incidents(db, incident, limit=limit)
 
 
-# Embedding model + Qdrant initialized lazily to avoid blocking startup.
-EMBEDDING_MODEL = None
+# Embedding + Qdrant initialized lazily to avoid blocking startup.
 QDRANT_HOST = cfg.get("QDRANT_HOST")
 QDRANT_PORT = cfg.get("QDRANT_PORT")
 COLLECTION_NAME = cfg.get("QDRANT_COLLECTION")
-EMBEDDING_MODEL_NAME = cfg.get("EMBEDDING_MODEL")
 _qdrant_client = None
-
-
-def _get_model():
-    global EMBEDDING_MODEL
-    if EMBEDDING_MODEL is None:
-        EMBEDDING_MODEL = SentenceTransformer(EMBEDDING_MODEL_NAME)
-    return EMBEDDING_MODEL
 
 
 def _get_qdrant():
@@ -226,7 +216,7 @@ def semantic_search(
     q: str = Query(..., description="Natural language search query"),
     limit: int = Query(10, ge=1, le=100),
 ):
-    vector = _get_model().encode(q).tolist()
+    vector = ll_embedding.embed(q)
     search_result = _get_qdrant().search(
         collection_name=COLLECTION_NAME, query_vector=vector, limit=limit
     )

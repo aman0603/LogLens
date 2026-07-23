@@ -7,8 +7,8 @@ pydantic>=2.5.0
 python-dotenv>=1.0.0
 confluent-kafka>=2.4.0
 faker
-sentence-transformers
 qdrant-client
 openai>=1.0.0
 prometheus_client>=0.20.0
+PyJWT>=2.8.0
 

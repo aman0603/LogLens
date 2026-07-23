@@ -13,15 +13,17 @@ sys.path.insert(
 
 # The API imports heavy optional deps at module load; stub them if absent so the
 # test is runnable in minimal environments (CI installs them via requirements).
-for name in ("sentence_transformers", "qdrant_client", "qdrant_client.models"):
+for name in ("qdrant_client", "qdrant_client.models", "loglens.embedding"):
     if name not in sys.modules:
         m = types.ModuleType(name)
-        if name == "sentence_transformers":
-            m.SentenceTransformer = object
-        elif name == "qdrant_client":
+        if name == "qdrant_client":
             m.QdrantClient = object
         elif name == "qdrant_client.models":
             m.Distance = object
+        elif name == "loglens.embedding":
+            m.embed = lambda text, model=None: [0.0] * 768
+            m.EMBEDDING_DIM = 768
+            m.DEFAULT_MODEL = "text-embedding-004"
         sys.modules[name] = m
 
 os.environ.setdefault("JWT_SECRET", "test-secret")

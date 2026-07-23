@@ -113,7 +113,7 @@ def get_similar_incidents(db, incident_id: int, limit: int = 5) -> List[Dict[str
 def semantic_neighbours(query_text: str, limit: int = 5) -> List[Dict[str, Any]]:
     """Optional semantic context via Qdrant. Returns [] if unavailable."""
     try:
-        from sentence_transformers import SentenceTransformer
+        from loglens import embedding as ll_embedding
         from qdrant_client import QdrantClient
     except ImportError:
         return []
@@ -122,9 +122,8 @@ def semantic_neighbours(query_text: str, limit: int = 5) -> List[Dict[str, Any]]
     port = int(os.getenv("QDRANT_PORT", 6333))
     collection = os.getenv("QDRANT_COLLECTION", "log_collection")
     try:
-        model = SentenceTransformer(os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"))
         client = QdrantClient(host=host, port=port)
-        vector = model.encode(query_text).tolist()
+        vector = ll_embedding.embed(query_text)
         hits = client.search(collection_name=collection, query_vector=vector, limit=limit)
     except Exception:
         return []
