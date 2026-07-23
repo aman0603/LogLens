@@ -46,7 +46,7 @@ def with_retry(
     try:
         data = json.loads(value.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
-        metrics.KAFKA_MESSAGES.labels(service=service, topic=topic, outcome="decode_error").inc()
+        metrics.record_kafka(service, topic, "decode_error")
         logger.error("Failed to decode message on %s; routing to DLQ", topic)
         _publish_dlq(producer, service, topic, value, key)
         return False
@@ -55,16 +55,16 @@ def with_retry(
     for attempt in range(1, max_attempts + 1):
         try:
             process(data)
-            metrics.KAFKA_MESSAGES.labels(service=service, topic=topic, outcome="success").inc()
+            metrics.record_kafka(service, topic, "success")
             return True
         except Exception as e:  # noqa: BLE001 - we retry on any failure
             last_err = e
-            metrics.KAFKA_MESSAGES.labels(service=service, topic=topic, outcome="retry").inc()
+            metrics.record_kafka(service, topic, "retry")
             if attempt < max_attempts:
                 time.sleep(base_backoff * (2 ** (attempt - 1)))
     # Exhausted: route to DLQ.
     logger.error("Message on %s failed after %d attempts: %s", topic, max_attempts, last_err)
-    metrics.KAFKA_MESSAGES.labels(service=service, topic=topic, outcome="dlq").inc()
+    metrics.record_kafka(service, topic, "dlq")
     _publish_dlq(producer, service, topic, value, key)
     return True
 

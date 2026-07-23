@@ -86,7 +86,7 @@ The docker-compose healthchecks hit `/health` on every service.
   runtime), runs as a non-root `appuser`, sets `PYTHONPATH=/app/shared`, and
   includes a `HEALTHCHECK`. Each service is built with
   `--build-arg SERVICE_DIR=./apps/<svc>`.
-- **Orchestration**: `infra/compose/docker-compose.yml` brings up Kafka,
+- **Orchestration**: `docker-compose.yml` brings up Kafka,
   Postgres, Qdrant, all services, Prometheus, Grafana, the OTel collector, and
   Jaeger, with health-based dependencies and a sidecar metrics port per service.
 - **CI/CD**: `.github/workflows/ci.yml` runs `ruff format --check`, `ruff check`,
@@ -96,7 +96,7 @@ The docker-compose healthchecks hit `/health` on every service.
 
 ```bash
 export JWT_SECRET=$(openssl rand -hex 32)
-docker compose -f infra/compose/docker-compose.yml up -d --build
+docker compose up -d --build
 # API:        http://localhost:8000  (dashboard at /dashboard)
 # AI service: http://localhost:8001
 # Prometheus: http://localhost:9090

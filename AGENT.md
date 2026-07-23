@@ -206,19 +206,14 @@ Do not hardcode provider-specific implementations where an abstraction already e
 
 When extending functionality, prefer existing modules before introducing new packages.
 
-This project uses shared Dockerfiles.
+This project uses a single shared multi-stage `Dockerfile.python` at the
+repository root for all Python services. Each service is built with
+`--build-arg SERVICE_DIR=./apps/<service>`; the Dockerfile copies the service and
+the shared library (`shared/`) into the image. Do not create a Dockerfile inside
+every service unless that service has unique build requirements.
 
-Do not create a Dockerfile inside every service unless that service has unique build requirements.
-
-Use:
-
-- Dockerfile.go
-- Dockerfile.python
-- Dockerfile.frontend
-
-at the repository root.
-
-All local development is orchestrated through a single root `docker-compose.yml`.
+All local development and deployment is orchestrated through
+`docker-compose.yml`.
 
 ---
 

@@ -10,4 +10,5 @@ faker
 sentence-transformers
 qdrant-client
 openai>=1.0.0
+prometheus_client>=0.20.0
 

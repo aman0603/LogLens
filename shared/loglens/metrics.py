@@ -5,51 +5,59 @@ request count, latency histogram, and error counter consistently. The registry
 is exposed via a /metrics endpoint (see ``make_metrics_app``).
 """
 
-from prometheus_client import (
-    Counter,
-    Histogram,
-    Gauge,
-    generate_latest,
-    CONTENT_TYPE_LATEST,
-    CollectorRegistry,
-)
+try:
+    from prometheus_client import (
+        Counter,
+        Histogram,
+        Gauge,
+        generate_latest,
+        CONTENT_TYPE_LATEST,
+        CollectorRegistry,
+    )
 
-# A shared registry so all instruments land in one /metrics scrape.
-REGISTRY = CollectorRegistry()
+    _HAVE_PROM = True
+except ImportError:  # pragma: no cover - optional dependency
+    _HAVE_PROM = False
 
-REQUEST_COUNT = Counter(
-    "http_requests_total",
-    "Total HTTP requests",
-    ["service", "method", "endpoint", "status"],
-    registry=REGISTRY,
-)
-REQUEST_LATENCY = Histogram(
-    "http_request_duration_seconds",
-    "HTTP request latency",
-    ["service", "method", "endpoint"],
-    registry=REGISTRY,
-)
-ERROR_COUNT = Counter(
-    "app_errors_total",
-    "Total application errors",
-    ["service", "type"],
-    registry=REGISTRY,
-)
-KAFKA_MESSAGES = Counter(
-    "kafka_messages_total",
-    "Total Kafka messages processed",
-    ["service", "topic", "outcome"],
-    registry=REGISTRY,
-)
-DB_OPS = Gauge(
-    "db_connections",
-    "Current DB connection pool size (approximated)",
-    ["service"],
-    registry=REGISTRY,
-)
+if _HAVE_PROM:
+    # A shared registry so all instruments land in one /metrics scrape.
+    REGISTRY = CollectorRegistry()
+
+    REQUEST_COUNT = Counter(
+        "http_requests_total",
+        "Total HTTP requests",
+        ["service", "method", "endpoint", "status"],
+        registry=REGISTRY,
+    )
+    REQUEST_LATENCY = Histogram(
+        "http_request_duration_seconds",
+        "HTTP request latency",
+        ["service", "method", "endpoint"],
+        registry=REGISTRY,
+    )
+    ERROR_COUNT = Counter(
+        "app_errors_total",
+        "Total application errors",
+        ["service", "type"],
+        registry=REGISTRY,
+    )
+    KAFKA_MESSAGES = Counter(
+        "kafka_messages_total",
+        "Total Kafka messages processed",
+        ["service", "topic", "outcome"],
+        registry=REGISTRY,
+    )
+    DB_OPS = Gauge(
+        "db_connections",
+        "Current DB connection pool size (approximated)",
+        ["service"],
+        registry=REGISTRY,
+    )
 
 
 def observe_request(service: str, method: str, endpoint: str, status: int, duration: float):
+    if not _HAVE_PROM:
+        return
     REQUEST_COUNT.labels(service=service, method=method, endpoint=endpoint, status=status).inc()
     REQUEST_LATENCY.labels(service=service, method=method, endpoint=endpoint).observe(duration)
     if status >= 500:
@@ -57,7 +65,15 @@ def observe_request(service: str, method: str, endpoint: str, status: int, durat
 
 
 def metrics_response():
+    if not _HAVE_PROM:
+        return b"", "text/plain"
     return generate_latest(REGISTRY), CONTENT_TYPE_LATEST
+
+
+def record_kafka(service: str, topic: str, outcome: str):
+    if not _HAVE_PROM:
+        return
+    KAFKA_MESSAGES.labels(service=service, topic=topic, outcome=outcome).inc()
 
 
 def start_sidecar(host: str = "0.0.0.0", port: int = 8000, service: str = "service"):
